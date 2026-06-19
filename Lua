@@ -1,0 +1,517 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- // تنظيف النسخ القديمة لمنع التداخل
+if game:GetService("CoreGui"):FindFirstChild("M7A_Glass_V8") then
+    game:GetService("CoreGui")["M7A_Glass_V8"]:Destroy()
+end
+
+local Boxes, WeaponTexts, Highlights, HealthTexts, DistanceTexts = {}, {}, {}, {}, {}
+local activeESP, activeWeaponESP, activeAimLock, activeSpeed, activeNoClip, activeHitbox, activeHealthESP, activeDistanceESP, activeFPSBoost = false, false, false, false, false, false, false, false, false
+local lockedPlayer = nil 
+
+-- دالة فحص السلاح مع دعم الألوان المتناسقة
+local function GetWeaponDetails(player)
+    local weaponName = "Bare Hands"
+    if player and player.Character then
+        local tool = player.Character:FindFirstChildOfClass("Tool")
+        if tool then weaponName = tool.Name end
+        if weaponName == "Bare Hands" and player:FindFirstChild("Backpack") then
+            local bTool = player.Backpack:FindFirstChildOfClass("Tool")
+            if bTool then weaponName = bTool.Name end
+        end
+    end
+    local lowerName = string.lower(weaponName)
+    local textColor = Color3.fromRGB(240, 240, 240)
+    if string.find(lowerName, "rpg") or string.find(lowerName, "ak") or string.find(lowerName, "mp5") or string.find(lowerName, "ايكي") or string.find(lowerName, "اربيجي") then
+        textColor = Color3.fromRGB(255, 215, 0)
+    end
+    return weaponName, textColor
+end
+
+-- دالة جلب لون الدم
+local function GetHealthColor(health, maxHealth)
+    local percent = health / maxHealth
+    if percent > 0.6 then
+        return Color3.fromRGB(160, 32, 240)
+    elseif percent > 0.3 then
+        return Color3.fromRGB(255, 130, 0)
+    else
+        return Color3.fromRGB(255, 40, 40)
+    end
+end
+
+local function CreateESP(player)
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = Color3.fromRGB(160, 32, 240)
+    box.Thickness = 1.5
+    box.Filled = false
+    Boxes[player] = box
+
+    local weaponText = Drawing.new("Text")
+    weaponText.Visible = false
+    weaponText.Size = 13
+    weaponText.Center = true
+    weaponText.Outline = true
+    weaponText.OutlineColor = Color3.fromRGB(0, 0, 0)
+    weaponText.Font = 2
+    WeaponTexts[player] = weaponText
+
+    local healthText = Drawing.new("Text")
+    healthText.Visible = false
+    healthText.Size = 12
+    healthText.Center = false
+    healthText.Outline = true
+    healthText.OutlineColor = Color3.fromRGB(0, 0, 0)
+    healthText.Font = 2
+    HealthTexts[player] = healthText
+
+    local distanceText = Drawing.new("Text")
+    distanceText.Visible = false
+    distanceText.Size = 12
+    distanceText.Center = true
+    distanceText.Outline = true
+    distanceText.OutlineColor = Color3.fromRGB(0, 0, 0)
+    distanceText.Font = 2
+    DistanceTexts[player] = distanceText
+
+    local function ApplyHighlight(char)
+        if not char or Highlights[player] then return end 
+        local highlight = Instance.new("Highlight")
+        pcall(function()
+            highlight.Name = "M7A_HL"
+            highlight.Parent = char
+            highlight.FillColor = Color3.fromRGB(160, 32, 240)
+            highlight.FillTransparency = 0.6
+            highlight.OutlineTransparency = 0.2
+            highlight.Enabled = activeESP 
+        end)
+        Highlights[player] = highlight
+    end
+
+    if player.Character then ApplyHighlight(player.Character) end
+    player.CharacterAdded:Connect(ApplyHighlight)
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then CreateESP(p) end
+end
+Players.PlayerAdded:Connect(CreateESP)
+Players.PlayerRemoving:Connect(function(p)
+    if Boxes[p] then Boxes[p]:Remove() Boxes[p] = nil end
+    if WeaponTexts[p] then WeaponTexts[p]:Remove() WeaponTexts[p] = nil end
+    if HealthTexts[p] then HealthTexts[p]:Remove() HealthTexts[p] = nil end
+    if DistanceTexts[p] then DistanceTexts[p]:Remove() DistanceTexts[p] = nil end
+    if Highlights[p] then pcall(function() Highlights[p]:Destroy() end) Highlights[p] = nil end
+end)
+
+-- // واجهة المستخدم
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "M7A_Glass_V8"
+ScreenGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+
+-- 🔘 زر الفتح الدائري الاحترافي [M7A]
+local OpenBtn = Instance.new("TextButton")
+OpenBtn.Size = UDim2.new(0, 55, 0, 55)
+OpenBtn.Position = UDim2.new(0, 20, 0.2, 0)
+OpenBtn.BackgroundColor3 = Color3.fromRGB(15, 8, 25)
+OpenBtn.BackgroundTransparency = 0.25
+OpenBtn.Text = "M7A"
+OpenBtn.TextColor3 = Color3.fromRGB(180, 50, 255)
+OpenBtn.Font = Enum.Font.GothamBold
+OpenBtn.TextSize = 15
+OpenBtn.Visible = false
+OpenBtn.Parent = ScreenGui
+Instance.new("UICorner", OpenBtn).CornerRadius = UDim.new(1, 0)
+local OpenStroke = Instance.new("UIStroke", OpenBtn)
+OpenStroke.Color = Color3.fromRGB(160, 32, 240)
+OpenStroke.Thickness = 1.5
+
+-- 🎯 زر تثبيت الآيم الدائري الذكي [LOCK]
+local AimLockToggle = Instance.new("TextButton")
+AimLockToggle.Size = UDim2.new(0, 60, 0, 60)
+AimLockToggle.Position = UDim2.new(0.7, 0, 0.3, 0)
+AimLockToggle.BackgroundColor3 = Color3.fromRGB(25, 10, 15)
+AimLockToggle.BackgroundTransparency = 0.2
+AimLockToggle.Text = "LOCK\nOFF"
+AimLockToggle.TextColor3 = Color3.fromRGB(255, 80, 80)
+AimLockToggle.Font = Enum.Font.GothamBold
+AimLockToggle.TextSize = 12
+AimLockToggle.Parent = ScreenGui
+Instance.new("UICorner", AimLockToggle).CornerRadius = UDim.new(1, 0)
+local LockStroke = Instance.new("UIStroke", AimLockToggle)
+LockStroke.Color = Color3.fromRGB(255, 50, 50)
+LockStroke.Thickness = 1.5
+
+-- 🔄 نظام متطور فائق الحساسية لمنع تداخل السحب والضغط تماماً
+local draggingBtn = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+local startTouchPos = nil
+local isRealDrag = false -- متغير يحدد إذا كان المستخدم يسحب فعلياً أم يضغط
+
+-- دالة لتغيير حالة الآيم لوك عند الضغط
+local function ToggleAimLockState()
+    activeAimLock = not activeAimLock
+    AimLockToggle.Text = activeAimLock and "LOCK\nON" or "LOCK\nOFF"
+    AimLockToggle.BackgroundColor3 = activeAimLock and Color3.fromRGB(35, 12, 65) or Color3.fromRGB(25, 10, 15)
+    AimLockToggle.TextColor3 = activeAimLock and Color3.fromRGB(200, 80, 255) or Color3.fromRGB(255, 80, 80)
+    LockStroke.Color = activeAimLock and Color3.fromRGB(180, 50, 255) or Color3.fromRGB(255, 50, 50)
+    if not activeAimLock then lockedPlayer = nil end
+end
+
+AimLockToggle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingBtn = true
+        isRealDrag = false
+        dragStart = input.Position
+        startTouchPos = Vector2.new(input.Position.X, input.Position.Y)
+        startPos = AimLockToggle.Position
+    end
+end)
+
+AimLockToggle.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+        if startTouchPos then
+            local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+            -- إذا تحرك الإصبع/الماوس أكثر من 15 بكسل، يتم اعتباره سحب وإلغاء الضغط
+            if (currentPos - startTouchPos).Magnitude > 15 then
+                isRealDrag = true
+            end
+        end
+    end
+end)
+
+AimLockToggle.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingBtn = false
+        -- إذا انتهت اللمسة ولم يتحرك الزر مسافة السحب، نفذ الضغطة فوراً
+        if not isRealDrag then
+            ToggleAimLockState()
+        end
+        startTouchPos = nil
+    end
+end)
+
+-- القائمة الرئيسية الزجاجية المحسنة
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 480, 0, 260)
+MainFrame.Position = UDim2.new(0.5, -240, 0.5, -130)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 8, 18)
+MainFrame.BackgroundTransparency = 0.25
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 16)
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = Color3.fromRGB(160, 32, 240)
+MainStroke.Thickness = 1.5
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 45)
+Header.BackgroundColor3 = Color3.fromRGB(20, 12, 30)
+Header.BackgroundTransparency = 0.4
+Header.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Text = "   M7A CYBER PANEL v8 [GLASS EDITION]"
+Title.Size = UDim2.new(1, -50, 1, 0)
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.BackgroundTransparency = 1
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 13
+Title.Parent = Header
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Text = "✕"
+CloseBtn.Size = UDim2.new(0, 45, 1, 0)
+CloseBtn.Position = UDim2.new(1, -45, 0, 0)
+CloseBtn.TextColor3 = Color3.fromRGB(160, 32, 240)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 18
+CloseBtn.Parent = Header
+
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(0, 130, 1, -45)
+TabBar.Position = UDim2.new(0, 0, 0, 45)
+TabBar.BackgroundColor3 = Color3.fromRGB(16, 10, 24)
+TabBar.BackgroundTransparency = 0.5
+TabBar.Parent = MainFrame
+
+local MainTabBtn = Instance.new("TextButton")
+MainTabBtn.Size = UDim2.new(1, -10, 0, 35)
+MainTabBtn.Position = UDim2.new(0, 5, 0, 15)
+MainTabBtn.BackgroundColor3 = Color3.fromRGB(35, 15, 60)
+MainTabBtn.Text = "Combat Mods"
+MainTabBtn.TextColor3 = Color3.fromRGB(200, 100, 255)
+MainTabBtn.Font = Enum.Font.GothamBold
+MainTabBtn.TextSize = 12
+MainTabBtn.Parent = TabBar
+Instance.new("UICorner", MainTabBtn).CornerRadius = UDim.new(0, 8)
+
+local ESPTabBtn = Instance.new("TextButton")
+ESPTabBtn.Size = UDim2.new(1, -10, 0, 35)
+ESPTabBtn.Position = UDim2.new(0, 5, 0, 55)
+ESPTabBtn.BackgroundColor3 = Color3.fromRGB(20, 12, 30)
+ESPTabBtn.Text = "Visuals / ESP"
+ESPTabBtn.TextColor3 = Color3.fromRGB(140, 130, 150)
+ESPTabBtn.Font = Enum.Font.GothamBold
+ESPTabBtn.TextSize = 12
+ESPTabBtn.Parent = TabBar
+Instance.new("UICorner", ESPTabBtn).CornerRadius = UDim.new(0, 8)
+
+local MainPage = Instance.new("Frame")
+MainPage.Size = UDim2.new(1, -140, 1, -55)
+MainPage.Position = UDim2.new(0, 135, 0, 50)
+MainPage.BackgroundTransparency = 1
+MainPage.Parent = MainFrame
+
+local ESPPage = Instance.new("Frame")
+ESPPage.Size = UDim2.new(1, -140, 1, -55)
+ESPPage.Position = UDim2.new(0, 135, 0, 50)
+ESPPage.BackgroundTransparency = 1
+ESPPage.Visible = false
+ESPPage.Parent = MainFrame
+
+local function CreateGridButton(parent, text, x, y)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 155, 0, 42)
+    btn.Position = UDim2.new(0, x * 165, 0, y * 52)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 15, 40)
+    btn.BackgroundTransparency = 0.4
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(170, 160, 180)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    local s = Instance.new("UIStroke", btn)
+    s.Color = Color3.fromRGB(50, 35, 75)
+    s.Thickness = 1
+    return btn, s
+end
+
+local SpeedToggle, stroke3 = CreateGridButton(MainPage, "Speed & Jump: OFF", 0, 0)
+local NoClipToggle, stroke4 = CreateGridButton(MainPage, "NoClip World: OFF", 1, 0)
+local HitboxToggle, stroke5 = CreateGridButton(MainPage, "Smart Hitbox: OFF", 0, 1)
+local FPSBoostToggle, strokeFPS = CreateGridButton(MainPage, "FPS Booster: OFF", 1, 1)
+
+local BoxToggle, stroke2 = CreateGridButton(ESPPage, "Box ESP: OFF", 0, 0)
+local WeaponToggle, strokeWeapon = CreateGridButton(ESPPage, "Weapon ESP: OFF", 1, 0)
+local HealthToggle, strokeHealth = CreateGridButton(ESPPage, "Health ESP: OFF", 0, 1)
+local DistanceToggle, strokeDistance = CreateGridButton(ESPPage, "Distance ESP: OFF", 1, 1)
+
+MainTabBtn.Activated:Connect(function()
+    MainPage.Visible = true; ESPPage.Visible = false
+    MainTabBtn.BackgroundColor3 = Color3.fromRGB(35, 15, 60); MainTabBtn.TextColor3 = Color3.fromRGB(200, 100, 255)
+    ESPTabBtn.BackgroundColor3 = Color3.fromRGB(20, 12, 30); ESPTabBtn.TextColor3 = Color3.fromRGB(140, 130, 150)
+end)
+
+ESPTabBtn.Activated:Connect(function()
+    MainPage.Visible = false; ESPPage.Visible = true
+    ESPTabBtn.BackgroundColor3 = Color3.fromRGB(35, 15, 60); ESPTabBtn.TextColor3 = Color3.fromRGB(200, 100, 255)
+    MainTabBtn.BackgroundColor3 = Color3.fromRGB(20, 12, 30); MainTabBtn.TextColor3 = Color3.fromRGB(140, 130, 150)
+end)
+
+CloseBtn.Activated:Connect(function() MainFrame.Visible = false; OpenBtn.Visible = true end)
+OpenBtn.Activated:Connect(function() MainFrame.Visible = true; OpenBtn.Visible = false end)
+
+local function SetupToggle(btn, stroke, varName, targetColor, callback)
+    btn.Activated:Connect(function()
+        _G[varName] = not _G[varName]
+        btn.TextColor3 = _G[varName] and targetColor or Color3.fromRGB(170, 160, 180)
+        stroke.Color = _G[varName] and targetColor or Color3.fromRGB(50, 35, 75)
+        btn.BackgroundColor3 = _G[varName] and Color3.fromRGB(45, 15, 75) or Color3.fromRGB(25, 15, 40)
+        if callback then callback(_G[varName]) end
+    end)
+end
+
+local purpleNeon = Color3.fromRGB(180, 50, 255)
+SetupToggle(BoxToggle, stroke2, "actESP", purpleNeon, function(v) activeESP = v; for _, h in pairs(Highlights) do pcall(function() h.Enabled = v end) end end)
+SetupToggle(WeaponToggle, strokeWeapon, "actWeap", purpleNeon, function(v) activeWeaponESP = v end)
+SetupToggle(HealthToggle, strokeHealth, "actHealth", purpleNeon, function(v) activeHealthESP = v end)
+SetupToggle(DistanceToggle, strokeDistance, "actDist", purpleNeon, function(v) activeDistanceESP = v end)
+SetupToggle(SpeedToggle, stroke3, "actSpeed", purpleNeon, function(v) activeSpeed = v end)
+SetupToggle(NoClipToggle, stroke4, "actClip", purpleNeon, function(v) activeNoClip = v end)
+SetupToggle(HitboxToggle, stroke5, "actHitbox", purpleNeon, function(v) activeHitbox = v end)
+
+SetupToggle(FPSBoostToggle, strokeFPS, "actFPS", purpleNeon, function(v) 
+    activeFPSBoost = v
+    if v then
+        Lighting.GlobalShadows = false
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("PostEffect") or v:IsA("BloomEffect") then v.Enabled = false end
+        end
+    else
+        Lighting.GlobalShadows = true
+    end
+end)
+
+local function GetClosestPlayer(center)
+    local closest, minDist = nil, math.huge
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
+            local pos, vis = Camera:WorldToViewportPoint(p.Character.Head.Position)
+            if vis then
+                local mDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                if mDist < minDist then minDist = mDist; closest = p end
+            end
+        end
+    end
+    return closest
+end
+
+RunService.Stepped:Connect(function()
+    if activeNoClip and LocalPlayer.Character then
+        for _, part in pairs(LocalPlayer.Character:GetChildren()) do
+            if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    -- تحديث موقع الزر عند السحب الحقيقي فقط
+    if draggingBtn and dragInput and isRealDrag and startPos then
+        local delta = dragInput.Position - dragStart
+        AimLockToggle.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    
+    local myChar = LocalPlayer.Character
+    if myChar then
+        local hum = myChar:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = activeSpeed and 25 or 16
+            hum.JumpPower = activeSpeed and 75 or 50
+            hum.JumpHeight = activeSpeed and 12 or 7.2
+        end
+    end
+
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
+            local head = p.Character.Head
+            if activeHitbox then
+                head.Size = Vector3.new(3, 3, 3)
+                head.Transparency = 0.5
+                head.Color = Color3.fromRGB(160, 32, 240)
+                head.CanCollide = false
+            else
+                head.Size = Vector3.new(1.2, 1.2, 1.2)
+                head.Transparency = 0
+            end
+        end
+    end
+
+    local targetPlayer = activeAimLock and (lockedPlayer or GetClosestPlayer(center)) or GetClosestPlayer(center)
+    if activeAimLock and targetPlayer then lockedPlayer = targetPlayer end
+
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
+        local headPos = targetPlayer.Character.Head.Position
+        local distance = (LocalPlayer.Character.Head.Position - headPos).Magnitude
+        local superOffsetHeight = 1.2 
+        if distance > 25 then superOffsetHeight = superOffsetHeight + (distance / 18) end
+        
+        local finalTargetPos = headPos + Vector3.new(0, superOffsetHeight, 0)
+        if activeAimLock then Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, finalTargetPos) end
+    else
+        if activeAimLock then lockedPlayer = nil end
+    end
+
+    -- تحديث الـ ESP
+    for player, box in pairs(Boxes) do
+        local char = player.Character
+        local wText = WeaponTexts[player]
+        local hText = HealthTexts[player]
+        local dText = DistanceTexts[player]
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        
+        if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Head") and hum and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local root = char.HumanoidRootPart
+            local head = char.Head
+            
+            local headPos, headVis = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+            local rootPos, rootVis = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.2, 0))
+
+            if headVis and rootVis then
+                local height = math.abs(headPos.Y - rootPos.Y)
+                if height < 20 then height = 20 end
+                local width = height / 1.5 
+
+                local currentHealthColor = GetHealthColor(hum.Health, hum.MaxHealth)
+                local calculatedDistance = math.floor((LocalPlayer.Character.HumanoidRootPart.Position - root.Position).Magnitude)
+
+                if activeESP then
+                    box.Size = Vector2.new(width, height)
+                    box.Position = Vector2.new(headPos.X - width / 2, headPos.Y)
+                    box.Color = currentHealthColor
+                    box.Visible = true
+                else
+                    box.Visible = false
+                end
+
+                if activeWeaponESP then
+                    local wName, wColor = GetWeaponDetails(player)
+                    wText.Text = "[" .. wName .. "]"
+                    wText.Color = wColor
+                    wText.Position = Vector2.new(headPos.X, rootPos.Y + 5)
+                    wText.Visible = true
+                else
+                    wText.Visible = false
+                end
+
+                if activeHealthESP then
+                    hText.Text = "HP: " .. math.floor(hum.Health)
+                    hText.Color = currentHealthColor
+                    hText.Position = Vector2.new(headPos.X - (width / 2) - 50, headPos.Y + 2)
+                    hText.Visible = true
+                else
+                    hText.Visible = false
+                end
+
+                if activeDistanceESP then
+                    dText.Text = "[" .. calculatedDistance .. "m]"
+                    dText.Color = Color3.fromRGB(200, 150, 255)
+                    dText.Position = Vector2.new(headPos.X, headPos.Y - 15)
+                    dText.Visible = true
+                else
+                    dText.Visible = false
+                end
+            else
+                box.Visible = false; wText.Visible = false; hText.Visible = false; dText.Visible = false
+            end
+        else
+            box.Visible = false; wText.Visible = false; hText.Visible = false; dText.Visible = false
+        end
+    end
+end)
+
+-- // نظام الإنعاش التلقائي
+local savedPosition = nil
+local function SetupAutoRespawn(character)
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    if humanoid then
+        humanoid.Died:Connect(function()
+            if character:FindFirstChild("HumanoidRootPart") then savedPosition = character.HumanoidRootPart.CFrame end
+            local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnRequest")
+            if respawnEvent and respawnEvent:IsA("RemoteEvent") then pcall(function() respawnEvent:FireServer() end) end
+        end)
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+    if savedPosition then
+        local rootPart = newCharacter:WaitForChild("HumanoidRootPart", 5)
+        if rootPart then task.wait(0.1) rootPart.CFrame = savedPosition savedPosition = nil end
+    end
+    SetupAutoRespawn(newCharacter)
+end)
+if LocalPlayer.Character then SetupAutoRespawn(LocalPlayer.Character) end
